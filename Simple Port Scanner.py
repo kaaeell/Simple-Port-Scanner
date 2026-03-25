@@ -1,5 +1,7 @@
 import socket
 import datetime
+import threading
+from queue import Queue
 
 # Common ports and their services
 COMMON_PORTS = {
@@ -21,83 +23,130 @@ COMMON_PORTS = {
     27017: "MongoDB",
 }
 
+open_ports = []
+lock = threading.Lock()
+
 def scan_port(host, port, timeout=1):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         result = sock.connect_ex((host, port))
         sock.close()
-        return result == 0  # True if open
+        return result == 0
     except socket.error:
         return False
 
+def worker(host, queue, results):
+    while not queue.empty():
+        port = queue.get()
+        is_open = scan_port(host, port)
+        if is_open:
+            service = COMMON_PORTS.get(port, "Unknown")
+            with lock:
+                results.append((port, service))
+                print(f"  ✅ OPEN  {port:<10} {service}")
+        queue.task_done()
+
 def resolve_host(host):
     try:
-        ip = socket.gethostbyname(host)
-        return ip
+        return socket.gethostbyname(host)
     except socket.gaierror:
         return None
 
-def scan(host, ports):
+def save_results(host, ip, ports, start_time, end_time, filename):
+    with open(filename, "w") as f:
+        f.write("=" * 50 + "\n")
+        f.write("   Port Scanner Report\n")
+        f.write("   by Yaser | github.com/kaaeell\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"\nTarget  : {host}\n")
+        f.write(f"IP      : {ip}\n")
+        f.write(f"Started : {start_time}\n")
+        f.write(f"Finished: {end_time}\n\n")
+        f.write(f"{'PORT':<10} {'SERVICE':<15} STATUS\n")
+        f.write("-" * 40 + "\n")
+        if ports:
+            for port, service in sorted(ports):
+                f.write(f"{port:<10} {service:<15} OPEN\n")
+        else:
+            f.write("No open ports found.\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"\nTotal open ports: {len(ports)}\n")
+    print(f"\n💾 Results saved to: {filename}")
+
+def get_ports(choice):
+    if choice == "1":
+        return list(COMMON_PORTS.keys())
+    elif choice == "2":
+        return list(range(1, 1025))
+    elif choice == "3":
+        try:
+            start = int(input("  Start port: "))
+            end = int(input("  End port  : "))
+            if start < 1 or end > 65535 or start > end:
+                print("❌ Invalid range. Using common ports.")
+                return list(COMMON_PORTS.keys())
+            return list(range(start, end + 1))
+        except ValueError:
+            print("❌ Invalid input. Using common ports.")
+            return list(COMMON_PORTS.keys())
+    else:
+        print("Invalid choice, scanning common ports by default.")
+        return list(COMMON_PORTS.keys())
+
+def main():
     print("=" * 50)
-    print("   🔍 Simple Port Scanner")
+    print("   🔍 Port Scanner v2.0")
     print("   by Yaser | github.com/kaaeell")
     print("=" * 50)
+
+    host = input("\nEnter target host (e.g. scanme.nmap.org): ").strip()
 
     ip = resolve_host(host)
     if not ip:
         print(f"\n❌ Could not resolve host: {host}")
         return
 
-    print(f"\n🎯 Target  : {host}")
-    print(f"🌐 IP      : {ip}")
-    print(f"⏰ Started : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🔎 Scanning {len(ports)} ports...\n")
-    print(f"{'PORT':<10} {'SERVICE':<15} {'STATUS'}")
-    print("-" * 40)
+    print("\n[1] Common ports only (fast)")
+    print("[2] Ports 1-1024 (thorough)")
+    print("[3] Custom port range")
+    choice = input("\nChoose an option (1/2/3): ").strip()
+    ports = get_ports(choice)
 
-    open_ports = []
+    save = input("\nSave results to file? (y/n): ").strip().lower()
 
+    start_time = datetime.datetime.now()
+    print(f"\n🎯 Target  : {host} ({ip})")
+    print(f"⏰ Started : {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔎 Scanning {len(ports)} ports with multithreading...\n")
+
+    queue = Queue()
     for port in ports:
-        is_open = scan_port(ip, port)
-        service = COMMON_PORTS.get(port, "Unknown")
-        status = "✅ OPEN" if is_open else "❌ closed"
+        queue.put(port)
 
-        if is_open:
-            open_ports.append(port)
-            print(f"{port:<10} {service:<15} {status}")
-        else:
-            print(f"{port:<10} {service:<15} {status}")
+    results = []
 
-    print("-" * 40)
-    print(f"\n📊 Scan complete!")
-    print(f"   Open ports found : {len(open_ports)}")
-    if open_ports:
-        print(f"   Open ports       : {', '.join(map(str, open_ports))}")
-    print(f"⏰ Finished : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    thread_count = min(100, len(ports))
+    for _ in range(thread_count):
+        t = threading.Thread(target=worker, args=(ip, queue, results))
+        t.daemon = True
+        t.start()
 
+    queue.join()
 
-def main():
-    print("=" * 50)
-    print("   🔍 Simple Port Scanner")
-    print("   by Yaser | github.com/kaaeell")
-    print("=" * 50)
+    end_time = datetime.datetime.now()
+    duration = (end_time - start_time).seconds
 
-    host = input("\nEnter target host (e.g. scanme.nmap.org): ").strip()
-    print("\n[1] Scan common ports only (fast)")
-    print("[2] Scan ports 1-1024 (thorough)")
-    choice = input("\nChoose an option (1 or 2): ").strip()
+    print("\n" + "-" * 40)
+    print(f"\n📊 Scan complete in {duration}s!")
+    print(f"   Open ports found : {len(results)}")
+    if results:
+        print(f"   Open ports       : {', '.join(str(p) for p, _ in sorted(results))}")
+    print(f"⏰ Finished : {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    if choice == "1":
-        ports = list(COMMON_PORTS.keys())
-    elif choice == "2":
-        ports = list(range(1, 1025))
-    else:
-        print("Invalid choice, scanning common ports by default.")
-        ports = list(COMMON_PORTS.keys())
-
-    scan(host, ports)
-
+    if save == "y":
+        filename = f"scan_{host}_{start_time.strftime('%Y%m%d_%H%M%S')}.txt"
+        save_results(host, ip, results, start_time.strftime('%Y-%m-%d %H:%M:%S'), end_time.strftime('%Y-%m-%d %H:%M:%S'), filename)
 
 if __name__ == "__main__":
     main()
