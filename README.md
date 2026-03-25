@@ -1,15 +1,16 @@
 # 🔍 Simple Port Scanner
 
-A lightweight command-line port scanner built with Python. This was my first cybersecurity project — it scans a target host for open ports and identifies the services running on them.
+A lightweight command-line port scanner built with Python. Scans a target host for open ports, identifies running services, and saves results to a file.
 
 ---
 
 ## 🚀 Features
 
+- ⚡ Multithreaded scanning (blazing fast)
 - Resolves hostnames to IP addresses
-- Scans common ports or full range (1–1024)
+- Scans common ports, full range (1–1024), or custom range
 - Identifies services (SSH, HTTP, FTP, MySQL, etc.)
-- Displays clean results with timestamps
+- 💾 Saves results to a timestamped `.txt` report
 - Pure Python — no external libraries needed
 
 ---
@@ -18,26 +19,32 @@ A lightweight command-line port scanner built with Python. This was my first cyb
 
 ```
 ==================================================
-   🔍 Simple Port Scanner
+   🔍 Port Scanner v2.0
    by Yaser | github.com/kaaeell
 ==================================================
 
-🎯 Target  : scanme.nmap.org
-🌐 IP      : 45.33.32.156
-⏰ Started : 2024-03-24 14:22:01
-🔎 Scanning 16 ports...
+Enter target host: scanme.nmap.org
 
-PORT       SERVICE         STATUS
-----------------------------------------
-22         SSH             ✅ OPEN
-80         HTTP            ✅ OPEN
-443        HTTPS           ❌ closed
-3306       MySQL           ❌ closed
+[1] Common ports only (fast)
+[2] Ports 1-1024 (thorough)
+[3] Custom port range
+
+Choose an option: 1
+Save results to file? (y/n): y
+
+🎯 Target  : scanme.nmap.org (45.33.32.156)
+⏰ Started : 2025-03-25 14:22:01
+🔎 Scanning 16 ports with multithreading...
+
+  ✅ OPEN  22         SSH
+  ✅ OPEN  80         HTTP
+
 ----------------------------------------
 
-📊 Scan complete!
+📊 Scan complete in 2s!
    Open ports found : 2
    Open ports       : 22, 80
+💾 Results saved to: scan_scanme.nmap.org_20250325_142201.txt
 ```
 
 ---
@@ -56,8 +63,6 @@ python port_scanner.py
 
 ## 💻 Usage
 
-Run the script and follow the prompts:
-
 ```bash
 python port_scanner.py
 ```
@@ -65,20 +70,20 @@ python port_scanner.py
 You'll be asked to:
 1. Enter a target host (domain or IP)
 2. Choose scan mode:
-   - **Option 1** — Scan common ports only (fast)
-   - **Option 2** — Scan ports 1–1024 (thorough)
+   - **Option 1** — Common ports only (fast)
+   - **Option 2** — Ports 1–1024 (thorough)
+   - **Option 3** — Custom port range
+3. Choose whether to save results to a `.txt` file
 
 ---
 
 ## 🧪 Safe Testing
 
-To test legally and safely, use:
+Use this free legal test server:
 
 ```
 scanme.nmap.org
 ```
-
-This is a server maintained by the Nmap team specifically for testing port scanners.
 
 > ⚠️ **Disclaimer:** Only scan hosts you own or have explicit permission to scan. Unauthorized port scanning may be illegal in your country.
 
@@ -88,6 +93,7 @@ This is a server maintained by the Nmap team specifically for testing port scann
 
 - How TCP sockets work in Python
 - What ports and services are
+- How multithreading speeds up network tasks
 - How tools like Nmap work under the hood
 - Basic network reconnaissance concepts
 
@@ -95,11 +101,13 @@ This is a server maintained by the Nmap team specifically for testing port scann
 
 ## 🗺️ Roadmap
 
-- [ ] Add multithreading for faster scans
-- [ ] Export results to a `.txt` or `.json` file
-- [ ] Add banner grabbing (detect software versions)
-- [ ] Add OS detection
-- [ ] Build a simple GUI
+- [x] Scan common ports
+- [x] Multithreading for faster scans
+- [x] Save results to `.txt` file
+- [x] Custom port range
+- [ ] Banner grabbing (detect software versions)
+- [ ] Export to `.json`
+- [ ] Scan multiple hosts at once
 
 ---
 
