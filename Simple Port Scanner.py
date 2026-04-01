@@ -1,28 +1,19 @@
 import socket
 import datetime
 import threading
+import json
 from queue import Queue
 
 COMMON_PORTS = {
-    21: "FTP",
-    22: "SSH",
-    23: "Telnet",
-    25: "SMTP",
-    53: "DNS",
-    80: "HTTP",
-    110: "POP3",
-    143: "IMAP",
-    443: "HTTPS",
-    3306: "MySQL",
-    3389: "RDP",
-    8080: "HTTP-Alt",
-    8443: "HTTPS-Alt",
-    5432: "PostgreSQL",
-    6379: "Redis",
-    27017: "MongoDB",
+    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP",
+    53: "DNS", 80: "HTTP", 110: "POP3", 143: "IMAP",
+    443: "HTTPS", 3306: "MySQL", 3389: "RDP",
+    8080: "HTTP-Alt", 8443: "HTTPS-Alt",
+    5432: "PostgreSQL", 6379: "Redis", 27017: "MongoDB",
 }
 
 lock = threading.Lock()
+scanned_count = 0
 
 
 def scan_port(host, port, timeout=1, grab_banner=False):
@@ -35,20 +26,21 @@ def scan_port(host, port, timeout=1, grab_banner=False):
         banner = ""
         if result == 0 and grab_banner:
             try:
-                sock.send(b"HEAD / HTTP/1.0\r\n\r\n")
+                sock.send(b"\r\n")
                 banner = sock.recv(1024).decode(errors="ignore").strip()
             except:
                 banner = "No banner"
 
         sock.close()
-
         return result == 0, banner
 
     except:
         return False, ""
 
 
-def worker(host, queue, results, grab_banner):
+def worker(host, queue, results, total_ports, grab_banner):
+    global scanned_count
+
     while True:
         try:
             port = queue.get_nowait()
@@ -57,11 +49,16 @@ def worker(host, queue, results, grab_banner):
 
         is_open, banner = scan_port(host, port, grab_banner=grab_banner)
 
+        with lock:
+            scanned_count += 1
+            progress = (scanned_count / total_ports) * 100
+            print(f"\rProgress: {progress:.1f}% ({scanned_count}/{total_ports})", end="")
+
         if is_open:
             service = COMMON_PORTS.get(port, "Unknown")
             with lock:
                 results.append((port, service, banner))
-                print(f"  ✅ {port:<6} {service:<12} OPEN")
+                print(f"\n  ✅ {port:<6} {service:<12} OPEN")
 
         queue.task_done()
 
@@ -73,11 +70,11 @@ def resolve_host(host):
         return None
 
 
-def save_results(host, ip, ports, start_time, end_time, filename):
+def save_results_txt(host, ip, ports, start_time, end_time, filename):
     with open(filename, "w") as f:
         f.write("=" * 50 + "\n")
         f.write("   Port Scanner Report v3.0\n")
-        f.write("   by Yaser | github.com/kaaeell\n")
+        f.write("   by Yaser\n")
         f.write("=" * 50 + "\n")
 
         f.write(f"\nTarget  : {host}\n")
@@ -85,22 +82,31 @@ def save_results(host, ip, ports, start_time, end_time, filename):
         f.write(f"Started : {start_time}\n")
         f.write(f"Finished: {end_time}\n\n")
 
-        f.write(f"{'PORT':<8} {'SERVICE':<15} {'STATUS'}\n")
-        f.write("-" * 40 + "\n")
-
-        if ports:
-            for port, service, _ in sorted(ports):
-                f.write(f"{port:<8} {service:<15} OPEN\n")
-        else:
-            f.write("No open ports found.\n")
-
-        f.write("-" * 40 + "\n")
-        f.write(f"\nTotal open ports: {len(ports)}\n")
-
-    print(f"\n💾 Results saved to: {filename}")
+        for port, service, _ in sorted(ports):
+            f.write(f"{port:<8} {service:<15} OPEN\n")
 
 
-def get_ports(choice):
+def save_results_json(host, ip, ports, filename):
+    data = {
+        "target": host,
+        "ip": ip,
+        "open_ports": [
+            {"port": p, "service": s, "banner": b}
+            for p, s, b in ports
+        ]
+    }
+
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+
+
+def get_ports():
+    print("\n[1] Common ports")
+    print("[2] 1–1024")
+    print("[3] Custom range")
+
+    choice = input("Choose: ").strip()
+
     if choice == "1":
         return list(COMMON_PORTS.keys())
     elif choice == "2":
@@ -111,7 +117,7 @@ def get_ports(choice):
             end = int(input("End port  : "))
             return list(range(start, end + 1))
         except:
-            print("❌ Invalid range. Using common ports.")
+            print("Invalid input. Using common ports.")
             return list(COMMON_PORTS.keys())
     else:
         return list(COMMON_PORTS.keys())
@@ -119,69 +125,53 @@ def get_ports(choice):
 
 def main():
     print("=" * 50)
-    print("   🔍 Port Scanner v3.0")
-    print("   by Yaser")
+    print("🔍 Port Scanner v3.1")
+    print("by Yaser")
     print("=" * 50)
 
-    host = input("\nEnter target (domain/IP): ").strip()
-    ip = resolve_host(host)
+    targets = input("\nEnter target(s) (comma-separated): ").split(",")
 
-    if not ip:
-        print("❌ Could not resolve host.")
-        return
-
-    print("\n[1] Common ports (fast)")
-    print("[2] 1–1024 (standard)")
-    print("[3] Custom range")
-
-    choice = input("Choose: ").strip()
-    ports = get_ports(choice)
-
+    ports = get_ports()
     grab_banner = input("Grab banners? (y/n): ").lower() == "y"
     save = input("Save results? (y/n): ").lower() == "y"
 
-    start_time = datetime.datetime.now()
+    for host in targets:
+        host = host.strip()
+        ip = resolve_host(host)
 
-    print(f"\n🎯 Target: {host} ({ip})")
-    print(f"🔎 Scanning {len(ports)} ports...\n")
+        if not ip:
+            print(f"❌ Could not resolve {host}")
+            continue
 
-    queue = Queue()
-    for port in ports:
-        queue.put(port)
+        print(f"\n🎯 Scanning {host} ({ip})")
 
-    results = []
-    threads = []
+        queue = Queue()
+        for port in ports:
+            queue.put(port)
 
-    thread_count = min(100, len(ports))
+        results = []
+        threads = []
+        global scanned_count
+        scanned_count = 0
 
-    for _ in range(thread_count):
-        t = threading.Thread(target=worker, args=(ip, queue, results, grab_banner))
-        t.start()
-        threads.append(t)
+        start_time = datetime.datetime.now()
 
-    for t in threads:
-        t.join()
+        for _ in range(min(100, len(ports))):
+            t = threading.Thread(target=worker, args=(ip, queue, results, len(ports), grab_banner))
+            t.start()
+            threads.append(t)
 
-    end_time = datetime.datetime.now()
-    duration = (end_time - start_time).total_seconds()
+        for t in threads:
+            t.join()
 
-    print("\n" + "-" * 40)
-    print(f"📊 Done in {duration:.2f}s")
-    print(f"Open ports: {len(results)}")
+        end_time = datetime.datetime.now()
 
-    if results:
-        print("Ports:", ", ".join(str(p) for p, _, _ in sorted(results)))
+        print(f"\n✅ Done: {len(results)} open ports")
 
-    if save:
-        filename = f"scan_{host}_{start_time.strftime('%Y%m%d_%H%M%S')}.txt"
-        save_results(
-            host,
-            ip,
-            results,
-            start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            end_time.strftime('%Y-%m-%d %H:%M:%S'),
-            filename,
-        )
+        if save:
+            timestamp = start_time.strftime('%Y%m%d_%H%M%S')
+            save_results_txt(host, ip, results, start_time, end_time, f"{host}_{timestamp}.txt")
+            save_results_json(host, ip, results, f"{host}_{timestamp}.json")
 
 
 if __name__ == "__main__":
